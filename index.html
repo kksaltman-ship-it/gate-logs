@@ -40,72 +40,124 @@
     </div>
 
 <script>
+    <script>
     let html5QrCode;
-    let gateName = "";
-    // 滞在中の人を管理する簡易リスト
     let stayList = JSON.parse(localStorage.getItem('gateStayList')) || {};
+    let logs = JSON.parse(localStorage.getItem('gateFullLogs')) || [];
+    let isScanning = false; 
 
-    async function startApp() {
-        gateName = document.getElementById('gateLocation').value;
-        document.getElementById('location-display').innerText = "📍 場所: " + gateName;
-        document.getElementById('setup-page').style.display = 'none';
-        document.getElementById('main-page').style.display = 'block';
+    // ページ読み込み時に表示を更新
+    window.onload = () => {
+        updateLogDisplay();
+        updateStayCount();
+    };
+
+    async function startScanner() {
+        const readerDiv = document.getElementById('reader');
+        readerDiv.style.display = 'block';
+        document.getElementById('start-btn').style.display = 'none';
 
         html5QrCode = new Html5Qrcode("reader");
-        await html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, (txt) => { processScan(txt); });
+        await html5QrCode.start(
+            { facingMode: "environment" }, 
+            { fps: 10, qrbox: 250 }, 
+            (txt) => { 
+                if (!isScanning) { 
+                    processScan(txt); 
+                }
+            }
+        );
     }
 
     function processScan(qrText) {
-        // QRの中身を「,」で分割（会社名,氏名,車種,車番）
+        isScanning = true; 
+        
         const info = qrText.split(',');
         if (info.length < 4) {
-            alert("QRコードの形式が正しくありません");
+            setTimeout(() => { isScanning = false; }, 2000); // 形式エラーでも2秒待機
             return;
         }
 
-        const personId = info[0] + info[1]; // 会社名+名前をIDにする
-        const now = new Date().toLocaleString();
+        // 成功の合図（バイブレーション）
+        if (navigator.vibrate) navigator.vibrate(200);
+
+        const [company, name, carType, carNum] = info;
+        const personId = company + name; // IDを生成
+        const gate = document.getElementById('gateLocation').value;
+        const now = new Date();
+        const timeStr = `${now.getHours()}:${now.getMinutes().toString().padStart(2,'0')}`;
         
-        // 入室か退室か判定
+        // 入退判定のロジック
         let status = "";
         if (!stayList[personId]) {
             status = "入室";
-            stayList[personId] = true;
+            stayList[personId] = { company, name, time: timeStr };
         } else {
             status = "退室";
             delete stayList[personId];
         }
 
+        // データの保存
         localStorage.setItem('gateStayList', JSON.stringify(stayList));
+        
+        const newLog = { status, company, name, carType, carNum, gate, time: timeStr };
+        logs.unshift(newLog);
+        if(logs.length > 50) logs.pop();
+        localStorage.setItem('gateFullLogs', JSON.stringify(logs));
 
-        // 結果表示
-        const resDiv = document.getElementById('result-area');
-        resDiv.innerHTML = `
-            <div class="card" style="border:2px solid #f1c40f;">
-                <h2 style="margin:0; text-align:center;" class="${status === '入室' ? 'status-in' : 'status-out'}">${status}処理完了</h2>
-                <p style="margin:10px 0 0 0;">
-                    <b>会社名:</b> ${info[0]}<br>
-                    <b>お名前:</b> ${info[1]} 様<br>
-                    <b>車両:</b> ${info[2]} (${info[3]})
-                </p>
-                <p style="font-size:0.8rem; color:#bdc3c7;">${now} | ${gateName}</p>
+        // 画面の更新
+        displayResult(newLog);
+        updateLogDisplay();
+        updateStayCount();
+
+        // 3秒間フリーズさせて二重読み取りを完全に防ぐ
+        setTimeout(() => {
+            isScanning = false;
+        }, 3000); 
+    }
+
+    function displayResult(log) {
+        const area = document.getElementById('latest-result');
+        area.innerHTML = `
+            <div class="info-card" style="border-left-color: ${log.status === '入室' ? '#2ecc71' : '#e74c3c'}">
+                <div style="font-size:1.2rem; font-weight:bold; text-align:center; border-bottom:1px solid #bdc3c7; margin-bottom:10px;">
+                    <span class="${log.status === '入室' ? 'in' : 'out'}">${log.status}完了</span>
+                </div>
+                <b>${log.company}</b> / ${log.name} 様<br>
+                <small>🚗 ${log.carType} (${log.carNum})</small><br>
+                <small style="color:#7f8c8d;">${log.time} | ${log.gate}</small>
             </div>
         `;
-
-        // 履歴に追加
-        addLog(status, info, now);
-        
-        // 3秒後にスキャンを再開できる状態にする（連続読み取り防止）
-        // ※実際はhtml5QrCodeの制御が必要ですが、まずは表示のみ
     }
 
-    function addLog(status, info, time) {
-        const logList = document.getElementById('log-list');
-        const entry = document.createElement('div');
-        entry.className = 'log-entry';
-        entry.innerHTML = `[${status}] ${info[0]} / ${info[1]} (${time})`;
-        logList.insertBefore(entry, logList.firstChild);
+    function updateLogDisplay() {
+        const listDiv = document.getElementById('log-list');
+        if (logs.length === 0) {
+            listDiv.innerHTML = '<div style="color:#7f8c8d; text-align:center;">履歴はありません</div>';
+            return;
+        }
+        listDiv.innerHTML = logs.map(l => `
+            <div class="log-entry">
+                <span><b class="${l.status === '入室' ? 'in' : 'out'}">${l.status === '入室' ? '入' : '出'}</b> ${l.name.substring(0,5)} (${l.company.substring(0,5)})</span>
+                <span style="color:#7f8c8d;">${l.time}</span>
+            </div>
+        `).join('');
     }
+
+    function updateStayCount() {
+        const count = Object.keys(stayList).length;
+        // 履歴タイトルの横に人数を表示させる
+        const title = document.querySelector('h4');
+        title.innerHTML = `🚩 最近の動き <span style="font-size:0.8rem; background:#f1c40f; color:#000; padding:2px 8px; border-radius:10px; margin-left:10px;">現在館内: ${count}名</span>`;
+    }
+
+    function clearLogs() {
+        if(confirm("すべての履歴と滞在情報をリセットしますか？\n（本日の業務終了時にのみ推奨）")) {
+            localStorage.clear();
+            location.reload();
+        }
+    }
+</script>
 </script>
 </body>
 </html>
