@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>出入り管理システム V1.0</title>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        body { font-family: sans-serif; background: #2c3e50; color: white; margin: 0; padding: 15px; }
+        .card { background: #34495e; padding: 15px; border-radius: 12px; margin-bottom: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        .btn { display: block; width: 100%; padding: 15px; border: none; border-radius: 8px; font-size: 1.1rem; font-weight: bold; cursor: pointer; color: white; margin-bottom: 10px; }
+        .btn-blue { background: #3498db; }
+        .btn-green { background: #27ae60; }
+        #reader { width: 100%; border-radius: 12px; overflow: hidden; background: #000; }
+        .log-entry { background: #ecf0f1; color: #2c3e50; padding: 10px; border-radius: 5px; margin-top: 5px; font-size: 0.9rem; border-left: 5px solid #2980b9; }
+        .status-in { color: #2ecc71; font-weight: bold; }
+        .status-out { color: #e74c3c; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div id="setup-page" style="text-align:center; padding-top:50px;">
+        <h2>出入り管理システム</h2>
+        <select id="gateLocation" style="width:80%; padding:15px; font-size:1.2rem; margin-bottom:20px; border-radius:8px;">
+            <option value="第1ゲート">第1ゲート</option>
+            <option value="第2ゲート">第2ゲート</option>
+        </select>
+        <button onclick="startApp()" class="btn btn-blue">スキャン開始</button>
+    </div>
+
+    <div id="main-page" style="display:none;">
+        <h3 id="location-display" style="text-align:center;"></h3>
+        <div id="reader"></div>
+        <div id="result-area" style="margin-top:20px;"></div>
+        
+        <h4>🚩 最近の出入り履歴</h4>
+        <div id="log-list"></div>
+        
+        <button onclick="location.reload()" class="btn" style="background:#7f8c8d; margin-top:20px;">ゲート選択に戻る</button>
+    </div>
+
+<script>
+    let html5QrCode;
+    let gateName = "";
+    // 滞在中の人を管理する簡易リスト
+    let stayList = JSON.parse(localStorage.getItem('gateStayList')) || {};
+
+    async function startApp() {
+        gateName = document.getElementById('gateLocation').value;
+        document.getElementById('location-display').innerText = "📍 場所: " + gateName;
+        document.getElementById('setup-page').style.display = 'none';
+        document.getElementById('main-page').style.display = 'block';
+
+        html5QrCode = new Html5Qrcode("reader");
+        await html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, (txt) => { processScan(txt); });
+    }
+
+    function processScan(qrText) {
+        // QRの中身を「,」で分割（会社名,氏名,車種,車番）
+        const info = qrText.split(',');
+        if (info.length < 4) {
+            alert("QRコードの形式が正しくありません");
+            return;
+        }
+
+        const personId = info[0] + info[1]; // 会社名+名前をIDにする
+        const now = new Date().toLocaleString();
+        
+        // 入室か退室か判定
+        let status = "";
+        if (!stayList[personId]) {
+            status = "入室";
+            stayList[personId] = true;
+        } else {
+            status = "退室";
+            delete stayList[personId];
+        }
+
+        localStorage.setItem('gateStayList', JSON.stringify(stayList));
+
+        // 結果表示
+        const resDiv = document.getElementById('result-area');
+        resDiv.innerHTML = `
+            <div class="card" style="border:2px solid #f1c40f;">
+                <h2 style="margin:0; text-align:center;" class="${status === '入室' ? 'status-in' : 'status-out'}">${status}処理完了</h2>
+                <p style="margin:10px 0 0 0;">
+                    <b>会社名:</b> ${info[0]}<br>
+                    <b>お名前:</b> ${info[1]} 様<br>
+                    <b>車両:</b> ${info[2]} (${info[3]})
+                </p>
+                <p style="font-size:0.8rem; color:#bdc3c7;">${now} | ${gateName}</p>
+            </div>
+        `;
+
+        // 履歴に追加
+        addLog(status, info, now);
+        
+        // 3秒後にスキャンを再開できる状態にする（連続読み取り防止）
+        // ※実際はhtml5QrCodeの制御が必要ですが、まずは表示のみ
+    }
+
+    function addLog(status, info, time) {
+        const logList = document.getElementById('log-list');
+        const entry = document.createElement('div');
+        entry.className = 'log-entry';
+        entry.innerHTML = `[${status}] ${info[0]} / ${info[1]} (${time})`;
+        logList.insertBefore(entry, logList.firstChild);
+    }
+</script>
+</body>
+</html>
