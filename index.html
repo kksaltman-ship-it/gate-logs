@@ -3,91 +3,96 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>出入り管理システム V1.0</title>
+    <title>出入り管理システム V1.2</title>
     <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
-        body { font-family: sans-serif; background: #2c3e50; color: white; margin: 0; padding: 15px; }
-        .card { background: #34495e; padding: 15px; border-radius: 12px; margin-bottom: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-        .btn { display: block; width: 100%; padding: 15px; border: none; border-radius: 8px; font-size: 1.1rem; font-weight: bold; cursor: pointer; color: white; margin-bottom: 10px; }
+        body { font-family: sans-serif; background: #2c3e50; color: white; margin: 0; padding: 10px; }
+        h2, h4 { margin: 10px 0; text-align: center; }
+        .setup-box { background: #34495e; padding: 15px; border-radius: 12px; margin-bottom: 15px; border: 1px solid #5d6d7e; }
+        .btn { display: block; width: 100%; padding: 15px; border: none; border-radius: 8px; font-size: 1.1rem; font-weight: bold; cursor: pointer; color: white; margin-top: 10px; box-sizing: border-box; }
         .btn-blue { background: #3498db; }
-        .btn-green { background: #27ae60; }
-        #reader { width: 100%; border-radius: 12px; overflow: hidden; background: #000; }
-        .log-entry { background: #ecf0f1; color: #2c3e50; padding: 10px; border-radius: 5px; margin-top: 5px; font-size: 0.9rem; border-left: 5px solid #2980b9; }
-        .status-in { color: #2ecc71; font-weight: bold; }
-        .status-out { color: #e74c3c; font-weight: bold; }
+        .btn-red { background: #e74c3c; font-size: 0.8rem; padding: 8px; margin-top: 20px; }
+        #reader { width: 100%; border-radius: 12px; overflow: hidden; background: #000; display: none; margin-bottom: 15px; }
+        .info-card { background: #ecf0f1; color: #2c3e50; padding: 15px; border-radius: 10px; margin-bottom: 15px; border-left: 8px solid #f1c40f; animation: slideIn 0.3s ease-out; }
+        .log-container { background: #1a252f; padding: 10px; border-radius: 10px; font-size: 0.85rem; max-height: 200px; overflow-y: auto; }
+        .log-entry { padding: 8px 0; border-bottom: 1px solid #2c3e50; display: flex; justify-content: space-between; }
+        .in { color: #2ecc71; font-weight: bold; } .out { color: #e74c3c; font-weight: bold; }
+        @keyframes slideIn { from {transform: translateY(-10px); opacity: 0;} to {transform: translateY(0); opacity: 1;} }
     </style>
 </head>
 <body>
 
-    <div id="setup-page" style="text-align:center; padding-top:50px;">
-        <h2>出入り管理システム</h2>
-        <select id="gateLocation" style="width:80%; padding:15px; font-size:1.2rem; margin-bottom:20px; border-radius:8px;">
-            <option value="第1ゲート">第1ゲート</option>
-            <option value="第2ゲート">第2ゲート</option>
-        </select>
-        <button onclick="startApp()" class="btn btn-blue">スキャン開始</button>
+    <h2>出入り管理ポータル</h2>
+
+    <div class="setup-box">
+        <div style="display:flex; gap:10px; align-items:center; margin-bottom:10px;">
+            <label style="flex:1;">📍 担当ゲート:</label>
+            <select id="gateLocation" style="flex:2; padding:8px; border-radius:5px;">
+                <option value="第1ゲート">第1ゲート</option>
+                <option value="第2ゲート">第2ゲート</option>
+            </select>
+        </div>
+        <button id="start-btn" onclick="startScanner()" class="btn btn-blue">📷 スキャン開始</button>
     </div>
 
-    <div id="main-page" style="display:none;">
-        <h3 id="location-display" style="text-align:center;"></h3>
-        <div id="reader"></div>
-        <div id="result-area" style="margin-top:20px;"></div>
-        
-        <h4>🚩 最近の出入り履歴</h4>
-        <div id="log-list"></div>
-        
-        <button onclick="location.reload()" class="btn" style="background:#7f8c8d; margin-top:20px;">ゲート選択に戻る</button>
+    <div id="reader"></div>
+    <div id="latest-result"></div>
+
+    <h4>🚩 最近の動き <span id="stay-count" style="font-size:0.8rem; background:#f1c40f; color:#000; padding:2px 8px; border-radius:10px; margin-left:10px;">現在館内: 0名</span></h4>
+    <div id="log-list" class="log-container">
+        <div style="color:#7f8c8d; text-align:center;">履歴はありません</div>
     </div>
+
+    <button onclick="clearLogs()" class="btn btn-red">⚠️ 履歴をすべて消去</button>
 
 <script>
-
     let html5QrCode;
     let stayList = JSON.parse(localStorage.getItem('gateStayList')) || {};
     let logs = JSON.parse(localStorage.getItem('gateFullLogs')) || [];
     let isScanning = false; 
 
-    // ページ読み込み時に表示を更新
     window.onload = () => {
         updateLogDisplay();
         updateStayCount();
     };
 
     async function startScanner() {
-        const readerDiv = document.getElementById('reader');
-        readerDiv.style.display = 'block';
-        document.getElementById('start-btn').style.display = 'none';
+        try {
+            const readerDiv = document.getElementById('reader');
+            readerDiv.style.display = 'block';
+            document.getElementById('start-btn').style.display = 'none';
 
-        html5QrCode = new Html5Qrcode("reader");
-        await html5QrCode.start(
-            { facingMode: "environment" }, 
-            { fps: 10, qrbox: 250 }, 
-            (txt) => { 
-                if (!isScanning) { 
-                    processScan(txt); 
+            html5QrCode = new Html5Qrcode("reader");
+            await html5QrCode.start(
+                { facingMode: "environment" }, 
+                { fps: 10, qrbox: 250 }, 
+                (txt) => { 
+                    if (!isScanning) { 
+                        processScan(txt); 
+                    }
                 }
-            }
-        );
+            );
+        } catch (err) {
+            alert("カメラの起動に失敗しました: " + err);
+        }
     }
 
     function processScan(qrText) {
         isScanning = true; 
-        
         const info = qrText.split(',');
         if (info.length < 4) {
-            setTimeout(() => { isScanning = false; }, 2000); // 形式エラーでも2秒待機
+            setTimeout(() => { isScanning = false; }, 2000);
             return;
         }
 
-        // 成功の合図（バイブレーション）
         if (navigator.vibrate) navigator.vibrate(200);
 
         const [company, name, carType, carNum] = info;
-        const personId = company + name; // IDを生成
+        const personId = company + name;
         const gate = document.getElementById('gateLocation').value;
         const now = new Date();
-        const timeStr = `${now.getHours()}:${now.getMinutes().toString().padStart(2,'0')}`;
+        const timeStr = now.getHours() + ":" + now.getMinutes().toString().padStart(2,'0');
         
-        // 入退判定のロジック
         let status = "";
         if (!stayList[personId]) {
             status = "入室";
@@ -97,7 +102,6 @@
             delete stayList[personId];
         }
 
-        // データの保存
         localStorage.setItem('gateStayList', JSON.stringify(stayList));
         
         const newLog = { status, company, name, carType, carNum, gate, time: timeStr };
@@ -105,12 +109,10 @@
         if(logs.length > 50) logs.pop();
         localStorage.setItem('gateFullLogs', JSON.stringify(logs));
 
-        // 画面の更新
         displayResult(newLog);
         updateLogDisplay();
         updateStayCount();
 
-        // 3秒間フリーズさせて二重読み取りを完全に防ぐ
         setTimeout(() => {
             isScanning = false;
         }, 3000); 
@@ -132,13 +134,10 @@
 
     function updateLogDisplay() {
         const listDiv = document.getElementById('log-list');
-        if (logs.length === 0) {
-            listDiv.innerHTML = '<div style="color:#7f8c8d; text-align:center;">履歴はありません</div>';
-            return;
-        }
+        if (logs.length === 0) return;
         listDiv.innerHTML = logs.map(l => `
             <div class="log-entry">
-                <span><b class="${l.status === '入室' ? 'in' : 'out'}">${l.status === '入室' ? '入' : '出'}</b> ${l.name.substring(0,5)} (${l.company.substring(0,5)})</span>
+                <span><b class="${l.status === '入室' ? 'in' : 'out'}">${l.status === '入室' ? '入' : '出'}</b> ${l.name} (${l.company})</span>
                 <span style="color:#7f8c8d;">${l.time}</span>
             </div>
         `).join('');
@@ -146,18 +145,15 @@
 
     function updateStayCount() {
         const count = Object.keys(stayList).length;
-        // 履歴タイトルの横に人数を表示させる
-        const title = document.querySelector('h4');
-        title.innerHTML = `🚩 最近の動き <span style="font-size:0.8rem; background:#f1c40f; color:#000; padding:2px 8px; border-radius:10px; margin-left:10px;">現在館内: ${count}名</span>`;
+        document.getElementById('stay-count').innerText = "現在館内: " + count + "名";
     }
 
     function clearLogs() {
-        if(confirm("すべての履歴と滞在情報をリセットしますか？\n（本日の業務終了時にのみ推奨）")) {
+        if(confirm("すべての履歴と滞在情報をリセットしますか？")) {
             localStorage.clear();
             location.reload();
         }
     }
-    
 </script>
 </body>
 </html>
